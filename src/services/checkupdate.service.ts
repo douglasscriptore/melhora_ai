@@ -1,4 +1,4 @@
-export const CURRENT_VERSION = "0.1.0";
+export const CURRENT_VERSION = "0.2.1";
 
 const REPO = "douglass/melhoraai";
 export const RELEASES_URL = `https://github.com/${REPO}/releases`;
@@ -10,6 +10,7 @@ export interface UpdateResult {
   status: Exclude<UpdateStatus, "idle" | "checking">;
   latestVersion: string | null;
   downloadUrl: string;
+  errorMessage?: string;
 }
 
 function isNewer(latest: string, current: string): boolean {
@@ -23,23 +24,30 @@ function isNewer(latest: string, current: string): boolean {
 }
 
 export async function checkForUpdate(): Promise<UpdateResult> {
+  let res: Response;
   try {
-    const res = await fetch(API_LATEST, { headers: { Accept: "application/vnd.github+json" } });
-    if (!res.ok) throw new Error();
-    const data = await res.json();
-
-    const latestVersion = (data.tag_name as string).replace(/^v/, "");
-    const isWin = /Windows/i.test(navigator.userAgent);
-    const ext = isWin ? ".exe" : ".dmg";
-    const asset = (data.assets as { name: string; browser_download_url: string }[])
-      .find((a) => a.name.endsWith(ext));
-
-    return {
-      status: isNewer(latestVersion, CURRENT_VERSION) ? "available" : "up_to_date",
-      latestVersion,
-      downloadUrl: asset?.browser_download_url ?? RELEASES_URL,
-    };
+    res = await fetch(API_LATEST, { headers: { Accept: "application/vnd.github+json" } });
   } catch {
-    return { status: "error", latestVersion: null, downloadUrl: RELEASES_URL };
+    return { status: "error", latestVersion: null, downloadUrl: RELEASES_URL, errorMessage: "Sem conexão com a internet." };
   }
+
+  if (res.status === 404) {
+    return { status: "error", latestVersion: null, downloadUrl: RELEASES_URL, errorMessage: "Nenhuma release encontrada. O repositório pode ser privado." };
+  }
+  if (!res.ok) {
+    return { status: "error", latestVersion: null, downloadUrl: RELEASES_URL, errorMessage: `Erro da API: HTTP ${res.status}.` };
+  }
+
+  const data = await res.json();
+  const latestVersion = (data.tag_name as string).replace(/^v/, "");
+  const isWin = /Windows/i.test(navigator.userAgent);
+  const ext = isWin ? ".exe" : ".dmg";
+  const asset = (data.assets as { name: string; browser_download_url: string }[])
+    .find((a) => a.name.endsWith(ext));
+
+  return {
+    status: isNewer(latestVersion, CURRENT_VERSION) ? "available" : "up_to_date",
+    latestVersion,
+    downloadUrl: asset?.browser_download_url ?? RELEASES_URL,
+  };
 }

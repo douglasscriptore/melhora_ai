@@ -100,13 +100,16 @@ export function SettingsPage({ settings, onSave, onBack }: Props) {
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>("idle");
   const [latestVersion, setLatestVersion] = useState<string | null>(null);
   const [downloadUrl, setDownloadUrl] = useState<string>(RELEASES_URL);
+  const [updateError, setUpdateError] = useState<string | null>(null);
 
   async function checkUpdate() {
     setUpdateStatus("checking");
+    setUpdateError(null);
     const result = await checkForUpdate();
     setUpdateStatus(result.status);
     setLatestVersion(result.latestVersion);
     setDownloadUrl(result.downloadUrl);
+    if (result.errorMessage) setUpdateError(result.errorMessage);
   }
   const models = PROVIDER_MODELS[form.apiProvider] ?? [];
   const info = PROVIDER_INFO[form.apiProvider];
@@ -328,7 +331,7 @@ export function SettingsPage({ settings, onSave, onBack }: Props) {
             <div className="flex flex-col items-center gap-3 py-2">
               <img src={logoFull} alt="Melhora.AI" draggable="false" className="h-9 w-auto select-none" />
               <span className="text-xs font-medium" style={{ color: "var(--muted)" }}>
-                Versão 0.1.0
+                Versão {CURRENT_VERSION}
               </span>
             </div>
 
@@ -379,7 +382,7 @@ export function SettingsPage({ settings, onSave, onBack }: Props) {
               )}
               {updateStatus === "error" && (
                 <span className="text-xs" style={{ color: "var(--danger, #ef4444)" }}>
-                  Não foi possível verificar atualizações.
+                  {updateError ?? "Não foi possível verificar atualizações."}
                 </span>
               )}
             </div>
