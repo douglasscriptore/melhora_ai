@@ -80,7 +80,7 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .manage(AppMode(Mutex::new("popup".to_string())))
+        .manage(AppMode(Mutex::new("window".to_string())))
         .setup(|app| {
             // Read saved window mode from store before the window is ever shown
             {
@@ -95,7 +95,7 @@ pub fn run() {
                             .as_str()
                             .map(|v| v.to_string())
                     })
-                    .unwrap_or_else(|| "popup".to_string());
+                    .unwrap_or_else(|| "window".to_string());
 
                 *app.state::<AppMode>().0.lock().unwrap() = saved_mode.clone();
 

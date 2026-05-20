@@ -9,7 +9,7 @@ const DEFAULTS: AppSettings = {
   model: "gpt-4o-mini",
   maxTextLength: 8000,
   saveHistory: true,
-  windowMode: "popup",
+  windowMode: "window",
   theme: "light",
 };
 
