@@ -13,6 +13,16 @@ Texto:
 
 Texto:
 `,
+  gerar_gc: `A partir do texto abaixo, gere um título e um subtítulo no formato GC para exibição em painel.
+
+Regras obrigatórias:
+- LINHA 1 (Título): máximo 61 caracteres, TUDO EM MAIÚSCULO
+- LINHA 2 (Subtítulo): máximo 79 caracteres, sem padrão de capitalização obrigatório
+
+Retorne SOMENTE as 2 linhas, uma por linha, sem numeração, sem rótulos, sem explicações.
+
+Texto:
+`,
 };
 
 export function buildPrompt(mode: AIMode, text: string): string {

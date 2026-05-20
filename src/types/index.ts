@@ -1,7 +1,8 @@
 export type AIMode =
   | "corrigir_portugues"
   | "melhorar_texto"
-  | "resumir";
+  | "resumir"
+  | "gerar_gc";
 
 export interface AIModeConfig {
   id: AIMode;
@@ -19,17 +20,20 @@ export interface HistoryEntry {
 }
 
 export interface AppSettings {
-  apiKey: string;
-  apiProvider: "openai" | "claude";
+  apiKeys: Record<string, string>;
+  apiProvider: "openai" | "claude" | "groq" | "openrouter" | "gemini";
   model: string;
   maxTextLength: number;
   saveHistory: boolean;
   windowMode: "popup" | "window";
   theme: "light" | "dark";
+  lastMode?: AIMode;
 }
 
 export interface AIResult {
   text: string;
   mode: AIMode;
-  tokensUsed?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  estimatedCostUSD?: number;
 }

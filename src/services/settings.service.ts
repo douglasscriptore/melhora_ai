@@ -4,7 +4,7 @@ import { AppSettings } from "../types";
 const STORE_FILE = "settings.json";
 
 const DEFAULTS: AppSettings = {
-  apiKey: "",
+  apiKeys: {},
   apiProvider: "openai",
   model: "gpt-4o-mini",
   maxTextLength: 8000,

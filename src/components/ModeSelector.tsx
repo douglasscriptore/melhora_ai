@@ -1,5 +1,5 @@
 import { Button } from "@heroui/react";
-import { SpellCheck, Sparkles, FileText, LucideIcon } from "lucide-react";
+import { SpellCheck, Sparkles, FileText, LayoutTemplate, LucideIcon } from "lucide-react";
 import { AIMode } from "../types";
 
 interface ModeConfig {
@@ -10,9 +10,10 @@ interface ModeConfig {
 }
 
 const MODES: ModeConfig[] = [
-  { id: "corrigir_portugues", label: "Corrigir", Icon: SpellCheck, description: "Correção gramatical e ortográfica" },
-  { id: "melhorar_texto",     label: "Melhorar", Icon: Sparkles,   description: "Clareza, fluidez e legibilidade" },
-  { id: "resumir",            label: "Resumir",  Icon: FileText,   description: "Resumo objetivo dos pontos principais" },
+  { id: "corrigir_portugues", label: "Corrigir", Icon: SpellCheck,      description: "Correção gramatical e ortográfica" },
+  { id: "melhorar_texto",     label: "Melhorar", Icon: Sparkles,        description: "Clareza, fluidez e legibilidade" },
+  { id: "resumir",            label: "Resumir",  Icon: FileText,        description: "Resumo objetivo dos pontos principais" },
+  { id: "gerar_gc",           label: "GC",       Icon: LayoutTemplate,  description: "Gerar título (61) + subtítulo (79) para painel" },
 ];
 
 interface Props {

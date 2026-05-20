@@ -1,21 +1,37 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, Component } from "react";
 import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { Button, Alert, Tooltip } from "@heroui/react";
-import { History, Settings, Clipboard, Copy, Check, Loader2, ArrowRight, Sun, Moon } from "lucide-react";
+import { History, Settings, Clipboard, Copy, Check, Loader2, ArrowRight, Sun, Moon, RefreshCw } from "lucide-react";
+import { Toast, toast } from "@heroui/react";
 import { AIMode, HistoryEntry } from "./types";
-import { processText } from "./services/ai.service";
+import { processText, PROVIDER_NAMES } from "./services/ai.service";
 import { addHistory } from "./services/history.service";
 import { useSettings } from "./hooks/useSettings";
 import { ModeSelector } from "./components/ModeSelector";
-import { SettingsDrawer } from "./components/SettingsModal";
+import { SettingsPage } from "./components/SettingsModal";
 import { HistoryDrawer } from "./components/HistoryPanel";
 import logoFull from "./assets/logo_full.png";
+import logoRpcDark from "./assets/logo.png";
+import logoRpcLight from "./assets/logo_default.png";
 import "./App.css";
 
 const isTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 const isWindows = typeof navigator !== "undefined" && /Windows/i.test(navigator.userAgent);
+
+class SettingsBoundary extends Component<{ children: React.ReactNode }, { err: string | null }> {
+  state = { err: null };
+  static getDerivedStateFromError(e: Error) { return { err: e.message + "\n\n" + (e.stack ?? "") }; }
+  render() {
+    if (this.state.err) return (
+      <div style={{ padding: 16, overflow: "auto", height: "100%", background: "#1a1a1a", color: "#ff6b6b", fontSize: 11, whiteSpace: "pre-wrap", fontFamily: "monospace" }}>
+        {"ERRO nas Configurações:\n\n" + this.state.err}
+      </div>
+    );
+    return this.props.children;
+  }
+}
 
 export default function App() {
   const { settings, loading, updateSettings } = useSettings();
@@ -26,8 +42,10 @@ export default function App() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [copiedGCLine, setCopiedGCLine] = useState<number | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [resultMeta, setResultMeta] = useState<{ inputTokens?: number; outputTokens?: number; estimatedCostUSD?: number } | null>(null);
 
   const readClipboard = useCallback(async () => {
     if (!isTauri()) return;
@@ -38,6 +56,12 @@ export default function App() {
   }, []);
 
   useEffect(() => { readClipboard(); }, [readClipboard]);
+
+  // Restore last used mode once settings load
+  useEffect(() => {
+    if (settings?.lastMode) setMode(settings.lastMode);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [!!settings]);
 
   // Apply window mode to Rust backend + DOM when settings load
   useEffect(() => {
@@ -80,15 +104,34 @@ export default function App() {
     setIsProcessing(true);
     setError(null);
     setResultText("");
+    setResultMeta(null);
     try {
-      const result = await processText(inputText, mode, settings);
-      setResultText(result.text);
+      const result = await processText(inputText, mode, settings, (chunk) => {
+        setResultText((prev) => prev + chunk);
+      });
+      setResultMeta({ inputTokens: result.inputTokens, outputTokens: result.outputTokens, estimatedCostUSD: result.estimatedCostUSD });
       if (settings.saveHistory) await addHistory(inputText, result.text, mode).catch(() => {});
+      // Auto-copy result
+      if (isTauri()) await writeText(result.text).catch(() => {});
+      else await navigator.clipboard.writeText(result.text).catch(() => {});
+      toast.success("Copiado!", { description: "Resultado na área de transferência." });
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setIsProcessing(false);
     }
+  }
+
+  function handleModeChange(m: AIMode) {
+    setMode(m);
+    if (settings) updateSettings({ ...settings, lastMode: m });
+  }
+
+  async function copyGCLine(line: string, index: number) {
+    if (isTauri()) await writeText(line);
+    else await navigator.clipboard.writeText(line);
+    setCopiedGCLine(index);
+    setTimeout(() => setCopiedGCLine(null), 1500);
   }
 
   async function handleCopy() {
@@ -127,6 +170,22 @@ export default function App() {
       className="app-root flex flex-col h-screen"
       style={{ background: "var(--background)", color: "var(--foreground)" }}
     >
+      <Toast.Provider placement="top" />
+
+      {showSettings && settings ? (
+        <SettingsBoundary>
+          <SettingsPage
+            settings={settings}
+            onSave={async (s) => {
+              await updateSettings(s);
+              if (isTauri()) invoke("apply_window_mode", { mode: s.windowMode ?? "popup" }).catch(() => {});
+              setShowSettings(false);
+            }}
+            onBack={() => setShowSettings(false)}
+          />
+        </SettingsBoundary>
+      ) : (
+      <>
 
       {/* Header */}
       <header
@@ -209,14 +268,15 @@ export default function App() {
         </div>
 
         {/* Mode selector */}
-        <ModeSelector selected={mode} onChange={setMode} disabled={isProcessing} />
+        <ModeSelector selected={mode} onChange={handleModeChange} disabled={isProcessing} />
 
         {/* Process button */}
         <Button
           variant="primary"
           fullWidth
           onPress={handleProcess}
-          isDisabled={isProcessing || !inputText.trim() || !settings?.apiKey}
+          isDisabled={isProcessing || !inputText.trim() || !settings?.apiKeys?.[settings.apiProvider]}
+          className="h-10 shrink-0"
         >
           {isProcessing
             ? <><Loader2 size={15} className="animate-spin" /> Processando...</>
@@ -235,19 +295,21 @@ export default function App() {
         )}
 
         {/* Onboarding / privacy notice */}
-        {!settings?.apiKey ? (
+        {!settings?.apiKeys?.[settings.apiProvider] ? (
           <Alert status="danger">
             <Alert.Indicator />
             <Alert.Content>
               <Alert.Description>
                 Chave de API não configurada.{" "}
-                <button
+                <span
+                  role="button"
+                  tabIndex={0}
                   className="underline font-semibold cursor-pointer"
-                  style={{ color: "inherit" }}
                   onClick={() => setShowSettings(true)}
+                  onKeyDown={(e) => e.key === "Enter" && setShowSettings(true)}
                 >
                   Abrir Configurações
-                </button>
+                </span>
               </Alert.Description>
             </Alert.Content>
           </Alert>
@@ -257,7 +319,7 @@ export default function App() {
             <Alert.Content>
               <Alert.Description>
                 Seus textos são enviados para a API da{" "}
-                <strong>{settings.apiProvider === "claude" ? "Anthropic" : "OpenAI"}</strong>.
+                <strong>{PROVIDER_NAMES[settings.apiProvider] ?? settings.apiProvider}</strong>.
                 {" "}Não inclua senhas, dados pessoais ou informações confidenciais.
               </Alert.Description>
             </Alert.Content>
@@ -265,7 +327,65 @@ export default function App() {
         ) : null}
 
         {/* Result section */}
-        {resultText && (
+        {resultText && mode === "gerar_gc" ? (() => {
+          const [gcLine1 = "", gcLine2 = ""] = resultText.split("\n").filter((l) => l.trim());
+          const gcLines = [gcLine1, gcLine2];
+          const limits = [61, 79];
+          const labels = ["Título", "Subtítulo"];
+          return (
+            <div className="flex flex-col gap-2">
+              <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--muted)" }}>
+                Resultado GC
+              </span>
+              {gcLines.map((line, i) => (
+                <div
+                  key={i}
+                  className="rounded-xl px-3 py-2.5 flex flex-col gap-1.5"
+                  style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--muted)" }}>
+                      Linha {i + 1} — {labels[i]}
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <span
+                        className="text-[10px] font-mono tabular-nums"
+                        style={{ color: line.length > limits[i] ? "var(--danger, #ef4444)" : "var(--muted)" }}
+                      >
+                        {line.length}/{limits[i]}
+                      </span>
+                      <Button size="sm" variant="ghost" isIconOnly aria-label="Copiar linha" onPress={() => copyGCLine(line, i)}>
+                        {copiedGCLine === i ? <Check size={13} /> : <Copy size={13} />}
+                      </Button>
+                    </div>
+                  </div>
+                  <p
+                    className="text-sm font-mono break-all leading-snug"
+                    style={{ color: "var(--foreground)" }}
+                  >
+                    {line || <span style={{ color: "var(--muted)" }}>—</span>}
+                  </p>
+                </div>
+              ))}
+              {resultMeta && (resultMeta.inputTokens !== undefined || resultMeta.estimatedCostUSD !== undefined) && (
+                <span className="text-xs" style={{ color: "var(--muted)" }}>
+                  {resultMeta.inputTokens !== undefined && `${resultMeta.inputTokens} + ${resultMeta.outputTokens ?? 0} tokens`}
+                  {resultMeta.estimatedCostUSD !== undefined && resultMeta.estimatedCostUSD > 0 && (
+                    <> &mdash; ~${resultMeta.estimatedCostUSD.toFixed(5)}</>
+                  )}
+                </span>
+              )}
+              <div className="flex justify-end gap-2 mt-1">
+                <Button variant="ghost" size="sm" onPress={handleProcess} isDisabled={isProcessing}>
+                  <RefreshCw size={13} /> Outra versão
+                </Button>
+                <Button variant="primary" size="sm" onPress={handleReplaceAndClose}>
+                  <Clipboard size={13} /> Copiar tudo e fechar
+                </Button>
+              </div>
+            </div>
+          );
+        })() : resultText ? (
           <div className="flex flex-col gap-1">
             <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--muted)" }}>
               Resultado
@@ -276,36 +396,51 @@ export default function App() {
               onChange={(e) => setResultText(e.target.value)}
               rows={5}
             />
+            {resultMeta && (resultMeta.inputTokens !== undefined || resultMeta.estimatedCostUSD !== undefined) && (
+              <span className="text-xs" style={{ color: "var(--muted)" }}>
+                {resultMeta.inputTokens !== undefined && `${resultMeta.inputTokens} + ${resultMeta.outputTokens ?? 0} tokens`}
+                {resultMeta.estimatedCostUSD !== undefined && resultMeta.estimatedCostUSD > 0 && (
+                  <> &mdash; ~${resultMeta.estimatedCostUSD.toFixed(5)}</>
+                )}
+              </span>
+            )}
             <div className="flex justify-end gap-2 mt-1">
+              <Button variant="ghost" size="sm" onPress={handleProcess} isDisabled={isProcessing}>
+                <RefreshCw size={13} /> Outra versão
+              </Button>
               <Button variant="outline" size="sm" onPress={handleCopy}>
                 {copied ? <><Check size={13} /> Copiado!</> : <><Copy size={13} /> Copiar</>}
               </Button>
               <Button variant="primary" size="sm" onPress={handleReplaceAndClose}>
-                <Clipboard size={13} /> Substituir e fechar
+                <Clipboard size={13} /> Copiar e fechar
               </Button>
             </div>
           </div>
-        )}
+        ) : null}
       </main>
 
-      {/* Drawers */}
-      {showSettings && settings && (
-        <SettingsDrawer
-          settings={settings}
-          onSave={async (s) => {
-            await updateSettings(s);
-            if (isTauri()) invoke("apply_window_mode", { mode: s.windowMode ?? "popup" }).catch(() => {});
-            setShowSettings(false);
-          }}
-          onClose={() => setShowSettings(false)}
+      {/* Powered by footer */}
+      <footer
+        className="shrink-0 flex items-center justify-center gap-1.5 py-1.5"
+        style={{ borderTop: "1px solid var(--border)" }}
+      >
+        <span className="text-[9px] uppercase tracking-widest" style={{ color: "var(--muted)" }}>Powered by</span>
+        <img
+          src={settings?.theme === "dark" ? logoRpcDark : logoRpcLight}
+          alt="RPC"
+          draggable="false"
+          className="h-3.5 w-auto select-none"
         />
-      )}
+      </footer>
 
       {showHistory && (
         <HistoryDrawer
           onSelect={handleHistorySelect}
           onClose={() => setShowHistory(false)}
         />
+      )}
+
+      </>
       )}
     </div>
   );

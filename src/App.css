@@ -17,6 +17,16 @@ html, body, #root {
   overflow: hidden;
 }
 
+/* Settings page slide-in */
+@keyframes settings-enter {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+
+.settings-page-enter {
+  animation: settings-enter 200ms cubic-bezier(0.2, 0, 0, 1);
+}
+
 /* Entrance animation — popup mode only */
 @keyframes app-enter {
   from {
@@ -84,6 +94,23 @@ body {
 
 .field-textarea.result:focus {
   border-color: var(--success);
+}
+
+/* Toast animation fallback — view-transition-class not supported in WebKit */
+@keyframes toast-slide-top-in {
+  from { translate: 0 -100%; opacity: 0; }
+}
+
+@keyframes toast-slide-top-out {
+  to   { translate: 0 -100%; opacity: 0; }
+}
+
+@supports not (view-transition-class: x) {
+  .toast[data-frontmost="true"].toast--top,
+  .toast[data-frontmost="true"].toast--top-start,
+  .toast[data-frontmost="true"].toast--top-end {
+    animation: toast-slide-top-in 350ms ease-out;
+  }
 }
 
 /* AI processing — animated gradient border directly on the textarea */
