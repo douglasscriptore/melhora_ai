@@ -7,7 +7,7 @@ import {
 import { ArrowLeft, ExternalLink, BadgeCheck, Eye, EyeOff, Sun, Moon, MessageSquareWarning, RefreshCw, Check, Loader2 } from "lucide-react";
 import { AppSettings } from "../types";
 import { PROVIDER_MODELS, MODEL_LABELS } from "../services/ai.service";
-import { checkForUpdate, CURRENT_VERSION, RELEASES_URL, UpdateStatus } from "../services/checkupdate.service";
+import { checkForUpdate, downloadAndInstall, CURRENT_VERSION, UpdateStatus } from "../services/checkupdate.service";
 import logoFull from "../assets/logo_full.png";
 import logoRpcDark from "../assets/logo.png";
 import logoRpcLight from "../assets/logo_default.png";
@@ -99,7 +99,7 @@ export function SettingsPage({ settings, onSave, onBack }: Props) {
   const [showKey, setShowKey] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>("idle");
   const [latestVersion, setLatestVersion] = useState<string | null>(null);
-  const [downloadUrl, setDownloadUrl] = useState<string>(RELEASES_URL);
+  const [downloadPct, setDownloadPct] = useState<number | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
 
   async function checkUpdate() {
@@ -107,9 +107,22 @@ export function SettingsPage({ settings, onSave, onBack }: Props) {
     setUpdateError(null);
     const result = await checkForUpdate();
     setUpdateStatus(result.status);
-    setLatestVersion(result.latestVersion);
-    setDownloadUrl(result.downloadUrl);
+    setLatestVersion(result.version ?? null);
     if (result.errorMessage) setUpdateError(result.errorMessage);
+  }
+
+  async function handleInstall() {
+    setUpdateStatus("downloading");
+    setDownloadPct(null);
+    try {
+      await downloadAndInstall((pct) => {
+        if (pct === 100) setUpdateStatus("installing");
+        else setDownloadPct(pct);
+      });
+    } catch (e: unknown) {
+      setUpdateStatus("error");
+      setUpdateError(e instanceof Error ? e.message : "Falha ao instalar.");
+    }
   }
   const models = PROVIDER_MODELS[form.apiProvider] ?? [];
   const info = PROVIDER_INFO[form.apiProvider];
@@ -355,7 +368,7 @@ export function SettingsPage({ settings, onSave, onBack }: Props) {
                 <Button
                   size="sm"
                   variant="outline"
-                  isDisabled={updateStatus === "checking"}
+                  isDisabled={["checking", "downloading", "installing"].includes(updateStatus)}
                   onPress={checkUpdate}
                   className="h-7 px-2.5 text-xs shrink-0"
                 >
@@ -375,9 +388,25 @@ export function SettingsPage({ settings, onSave, onBack }: Props) {
                   <span className="text-xs" style={{ color: "var(--warning, #f59e0b)" }}>
                     Nova versão: <strong>v{latestVersion}</strong>
                   </span>
-                  <Button size="sm" variant="primary" onPress={() => openLink(downloadUrl)} className="h-7 px-2.5 text-xs shrink-0">
-                    <ExternalLink size={11} /> Baixar
+                  <Button size="sm" variant="primary" onPress={handleInstall} className="h-7 px-2.5 text-xs shrink-0">
+                    <ExternalLink size={11} /> Baixar e instalar
                   </Button>
+                </div>
+              )}
+              {updateStatus === "downloading" && (
+                <div className="flex items-center gap-2">
+                  <Loader2 size={12} className="animate-spin shrink-0" style={{ color: "var(--accent)" }} />
+                  <span className="text-xs" style={{ color: "var(--muted)" }}>
+                    {downloadPct !== null ? `Baixando... ${downloadPct}%` : "Baixando..."}
+                  </span>
+                </div>
+              )}
+              {updateStatus === "installing" && (
+                <div className="flex items-center gap-2">
+                  <Loader2 size={12} className="animate-spin shrink-0" style={{ color: "var(--accent)" }} />
+                  <span className="text-xs" style={{ color: "var(--muted)" }}>
+                    Instalando... O app será reiniciado.
+                  </span>
                 </div>
               )}
               {updateStatus === "error" && (
@@ -391,7 +420,7 @@ export function SettingsPage({ settings, onSave, onBack }: Props) {
               <Button
                 variant="outline"
                 fullWidth
-                onPress={() => openLink("https://github.com/douglass/melhoraai/issues")}
+                onPress={() => openLink("https://github.com/douglasscriptore/melhora_ai/issues")}
                 className="text-sm justify-start"
               >
                 <MessageSquareWarning size={14} /> Relatar um problema

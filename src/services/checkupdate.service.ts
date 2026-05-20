@@ -1,53 +1,69 @@
 export const CURRENT_VERSION = "0.2.1";
+export const RELEASES_URL = "https://github.com/douglasscriptore/melhora_ai/releases";
 
-const REPO = "douglass/melhoraai";
-export const RELEASES_URL = `https://github.com/${REPO}/releases`;
-const API_LATEST = `https://api.github.com/repos/${REPO}/releases/latest`;
+type DownloadEvent =
+  | { event: "Started"; data: { contentLength?: number } }
+  | { event: "Progress"; data: { chunkLength: number } }
+  | { event: "Finished" };
 
-export type UpdateStatus = "idle" | "checking" | "up_to_date" | "available" | "error";
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Update = { available: boolean; version: string; downloadAndInstall(cb: (e: DownloadEvent) => void): Promise<void> };
 
-export interface UpdateResult {
-  status: Exclude<UpdateStatus, "idle" | "checking">;
-  latestVersion: string | null;
-  downloadUrl: string;
+export type UpdateStatus =
+  | "idle"
+  | "checking"
+  | "up_to_date"
+  | "available"
+  | "downloading"
+  | "installing"
+  | "error";
+
+export interface CheckResult {
+  status: "up_to_date" | "available" | "error";
+  version?: string;
   errorMessage?: string;
 }
 
-function isNewer(latest: string, current: string): boolean {
-  const l = latest.split(".").map(Number);
-  const c = current.split(".").map(Number);
-  for (let i = 0; i < 3; i++) {
-    if ((l[i] ?? 0) > (c[i] ?? 0)) return true;
-    if ((l[i] ?? 0) < (c[i] ?? 0)) return false;
+let _pending: Update | null = null;
+
+export async function checkForUpdate(): Promise<CheckResult> {
+  try {
+    const { check } = await import("@tauri-apps/plugin-updater");
+    const update = await check();
+    _pending = update;
+    if (!update?.available) return { status: "up_to_date" };
+    return { status: "available", version: update.version };
+  } catch (e: unknown) {
+    return {
+      status: "error",
+      errorMessage: e instanceof Error ? e.message : String(e),
+    };
   }
-  return false;
 }
 
-export async function checkForUpdate(): Promise<UpdateResult> {
-  let res: Response;
-  try {
-    res = await fetch(API_LATEST, { headers: { Accept: "application/vnd.github+json" } });
-  } catch {
-    return { status: "error", latestVersion: null, downloadUrl: RELEASES_URL, errorMessage: "Sem conexão com a internet." };
-  }
+export async function downloadAndInstall(
+  onProgress: (pct: number | null) => void
+): Promise<void> {
+  if (!_pending) throw new Error("Nenhuma atualização pendente.");
+  let downloaded = 0;
+  let total: number | undefined;
 
-  if (res.status === 404) {
-    return { status: "error", latestVersion: null, downloadUrl: RELEASES_URL, errorMessage: "Nenhuma release encontrada. O repositório pode ser privado." };
-  }
-  if (!res.ok) {
-    return { status: "error", latestVersion: null, downloadUrl: RELEASES_URL, errorMessage: `Erro da API: HTTP ${res.status}.` };
-  }
+  await _pending.downloadAndInstall((event) => {
+    switch (event.event) {
+      case "Started":
+        total = event.data.contentLength;
+        onProgress(0);
+        break;
+      case "Progress":
+        downloaded += event.data.chunkLength;
+        onProgress(total ? Math.round((downloaded / total) * 100) : null);
+        break;
+      case "Finished":
+        onProgress(100);
+        break;
+    }
+  });
 
-  const data = await res.json();
-  const latestVersion = (data.tag_name as string).replace(/^v/, "");
-  const isWin = /Windows/i.test(navigator.userAgent);
-  const ext = isWin ? ".exe" : ".dmg";
-  const asset = (data.assets as { name: string; browser_download_url: string }[])
-    .find((a) => a.name.endsWith(ext));
-
-  return {
-    status: isNewer(latestVersion, CURRENT_VERSION) ? "available" : "up_to_date",
-    latestVersion,
-    downloadUrl: asset?.browser_download_url ?? RELEASES_URL,
-  };
+  const { relaunch } = await import("@tauri-apps/plugin-process");
+  await relaunch();
 }

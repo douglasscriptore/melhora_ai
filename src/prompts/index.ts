@@ -13,7 +13,7 @@ Texto:
 
 Texto:
 `,
-  gerar_gc: `A partir do texto abaixo, gere um título e um subtítulo no formato GC para exibição em painel.
+  gerar_gc: `A partir do texto abaixo, gere um título e um subtítulo no formato Gerador de Caracteres para exibição em painel.
 
 Regras obrigatórias:
 - LINHA 1 (Título): máximo 61 caracteres, TUDO EM MAIÚSCULO
