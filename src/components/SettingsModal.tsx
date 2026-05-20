@@ -4,9 +4,10 @@ import {
   Select, SelectTrigger, SelectValue, SelectIndicator, SelectPopover,
   ListBox, ListBoxItem, Tabs,
 } from "@heroui/react";
-import { ArrowLeft, ExternalLink, BadgeCheck, Eye, EyeOff, Sun, Moon, MessageSquareWarning } from "lucide-react";
+import { ArrowLeft, ExternalLink, BadgeCheck, Eye, EyeOff, Sun, Moon, MessageSquareWarning, RefreshCw, Check, Loader2 } from "lucide-react";
 import { AppSettings } from "../types";
 import { PROVIDER_MODELS, MODEL_LABELS } from "../services/ai.service";
+import { checkForUpdate, CURRENT_VERSION, RELEASES_URL, UpdateStatus } from "../services/checkupdate.service";
 import logoFull from "../assets/logo_full.png";
 import logoRpcDark from "../assets/logo.png";
 import logoRpcLight from "../assets/logo_default.png";
@@ -96,6 +97,17 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 export function SettingsPage({ settings, onSave, onBack }: Props) {
   const [form, setForm] = useState<AppSettings>({ ...settings });
   const [showKey, setShowKey] = useState(false);
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus>("idle");
+  const [latestVersion, setLatestVersion] = useState<string | null>(null);
+  const [downloadUrl, setDownloadUrl] = useState<string>(RELEASES_URL);
+
+  async function checkUpdate() {
+    setUpdateStatus("checking");
+    const result = await checkForUpdate();
+    setUpdateStatus(result.status);
+    setLatestVersion(result.latestVersion);
+    setDownloadUrl(result.downloadUrl);
+  }
   const models = PROVIDER_MODELS[form.apiProvider] ?? [];
   const info = PROVIDER_INFO[form.apiProvider];
 
@@ -327,6 +339,50 @@ export function SettingsPage({ settings, onSave, onBack }: Props) {
             </p>
 
             <div className="h-px" style={{ background: "var(--border)" }} />
+
+            {/* Update checker */}
+            <div
+              className="rounded-xl px-3 py-2.5 flex flex-col gap-2"
+              style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs" style={{ color: "var(--muted)" }}>
+                  Versão instalada: <span className="font-semibold" style={{ color: "var(--foreground)" }}>{CURRENT_VERSION}</span>
+                </span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  isDisabled={updateStatus === "checking"}
+                  onPress={checkUpdate}
+                  className="h-7 px-2.5 text-xs shrink-0"
+                >
+                  {updateStatus === "checking"
+                    ? <><Loader2 size={11} className="animate-spin" /> Verificando...</>
+                    : <><RefreshCw size={11} /> Verificar</>}
+                </Button>
+              </div>
+
+              {updateStatus === "up_to_date" && (
+                <span className="text-xs flex items-center gap-1.5" style={{ color: "var(--success, #22c55e)" }}>
+                  <Check size={12} /> Você está na versão mais recente
+                </span>
+              )}
+              {updateStatus === "available" && (
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs" style={{ color: "var(--warning, #f59e0b)" }}>
+                    Nova versão: <strong>v{latestVersion}</strong>
+                  </span>
+                  <Button size="sm" variant="primary" onPress={() => openLink(downloadUrl)} className="h-7 px-2.5 text-xs shrink-0">
+                    <ExternalLink size={11} /> Baixar
+                  </Button>
+                </div>
+              )}
+              {updateStatus === "error" && (
+                <span className="text-xs" style={{ color: "var(--danger, #ef4444)" }}>
+                  Não foi possível verificar atualizações.
+                </span>
+              )}
+            </div>
 
             <div className="flex flex-col gap-2">
               <Button
