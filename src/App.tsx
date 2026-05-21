@@ -131,7 +131,8 @@ export default function App() {
     if (isTauri()) await writeText(line);
     else await navigator.clipboard.writeText(line);
     setCopiedGCLine(index);
-    setTimeout(() => setCopiedGCLine(null), 1500);
+    setTimeout(() => setCopiedGCLine(null), 3000);
+    toast.success("Copiado!", { description: "Linha copiada para a área de transferência." });
   }
 
   async function handleCopy() {
@@ -139,7 +140,8 @@ export default function App() {
     if (isTauri()) await writeText(resultText);
     else await navigator.clipboard.writeText(resultText);
     setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    setTimeout(() => setCopied(false), 3000);
+    toast.success("Copiado!", { description: "Resultado copiado para a área de transferência." });
   }
 
   async function handleReplaceAndClose() {
@@ -341,11 +343,21 @@ export default function App() {
                 <div
                   key={i}
                   className="rounded-xl px-3 py-2.5 flex flex-col gap-1.5"
-                  style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Copiar linha ${i + 1}`}
+                  onClick={() => copyGCLine(line, i)}
+                  onKeyDown={(e) => e.key === "Enter" && copyGCLine(line, i)}
+                  style={{
+                    background: "var(--surface)",
+                    border: `1px solid ${copiedGCLine === i ? "var(--success)" : line.length > limits[i] ? "var(--danger, #ef4444)" : "var(--border)"}`,
+                    cursor: "pointer",
+                    transition: "border-color 600ms ease",
+                  }}
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--muted)" }}>
-                      Linha {i + 1} — {labels[i]}
+                    <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--muted)", transition: "color 600ms ease" }}>
+                      {copiedGCLine === i ? "Copiado!" : `Linha ${i + 1} — ${labels[i]}`}
                     </span>
                     <div className="flex items-center gap-1.5">
                       <span
@@ -354,9 +366,9 @@ export default function App() {
                       >
                         {line.length}/{limits[i]}
                       </span>
-                      <Button size="sm" variant="ghost" isIconOnly aria-label="Copiar linha" onPress={() => copyGCLine(line, i)}>
-                        {copiedGCLine === i ? <Check size={13} /> : <Copy size={13} />}
-                      </Button>
+                      {copiedGCLine === i
+                        ? <Check size={13} style={{ color: "var(--success)" }} />
+                        : <Copy size={13} style={{ color: "var(--muted)" }} />}
                     </div>
                   </div>
                   <p
@@ -386,16 +398,36 @@ export default function App() {
             </div>
           );
         })() : resultText ? (
-          <div className="flex flex-col gap-1">
-            <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--muted)" }}>
-              Resultado
-            </span>
-            <textarea
-              className="field-textarea result"
-              value={resultText}
-              onChange={(e) => setResultText(e.target.value)}
-              rows={5}
-            />
+          <div className="flex flex-col gap-2">
+            <div
+              className="rounded-xl px-3 py-2.5 flex flex-col gap-2"
+              role="button"
+              tabIndex={0}
+              aria-label="Copiar resultado"
+              onClick={handleCopy}
+              onKeyDown={(e) => e.key === "Enter" && handleCopy()}
+              style={{
+                background: "var(--surface)",
+                border: `1px solid ${copied ? "var(--success)" : "var(--border)"}`,
+                cursor: "pointer",
+                transition: "border-color 600ms ease",
+              }}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--muted)", transition: "color 600ms ease" }}>
+                  {copied ? "Copiado!" : "Resultado — clique para copiar"}
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] font-mono tabular-nums" style={{ color: "var(--muted)" }}>
+                    {resultText.length} caracteres
+                  </span>
+                  {copied ? <Check size={13} style={{ color: "var(--success)" }} /> : <Copy size={13} style={{ color: "var(--muted)" }} />}
+                </div>
+              </div>
+              <p className="text-sm leading-relaxed whitespace-pre-wrap break-words" style={{ color: "var(--foreground)" }}>
+                {resultText}
+              </p>
+            </div>
             {resultMeta && (resultMeta.inputTokens !== undefined || resultMeta.estimatedCostUSD !== undefined) && (
               <span className="text-xs" style={{ color: "var(--muted)" }}>
                 {resultMeta.inputTokens !== undefined && `${resultMeta.inputTokens} + ${resultMeta.outputTokens ?? 0} tokens`}
@@ -407,9 +439,6 @@ export default function App() {
             <div className="flex justify-end gap-2 mt-1">
               <Button variant="ghost" size="sm" onPress={handleProcess} isDisabled={isProcessing}>
                 <RefreshCw size={13} /> Outra versão
-              </Button>
-              <Button variant="outline" size="sm" onPress={handleCopy}>
-                {copied ? <><Check size={13} /> Copiado!</> : <><Copy size={13} /> Copiar</>}
               </Button>
               <Button variant="primary" size="sm" onPress={handleReplaceAndClose}>
                 <Clipboard size={13} /> Copiar e fechar
