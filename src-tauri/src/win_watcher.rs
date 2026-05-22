@@ -1,5 +1,6 @@
 use std::sync::{Mutex, OnceLock};
 use tauri::{Emitter, Manager};
+use windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY;
 
 static LAST_HWND: OnceLock<Mutex<isize>> = OnceLock::new();
 
@@ -49,6 +50,8 @@ pub fn write_to_clipboard_and_paste(text: &str) {
 
 fn send_key_combo(modifier: VIRTUAL_KEY, key: VIRTUAL_KEY) {
     use windows::Win32::UI::Input::KeyboardAndMouse::*;
+    let key_down = KEYBD_EVENT_FLAGS(0);
+
     unsafe {
         let inputs = [
             INPUT {
@@ -57,7 +60,7 @@ fn send_key_combo(modifier: VIRTUAL_KEY, key: VIRTUAL_KEY) {
                     ki: KEYBDINPUT {
                         wVk: modifier,
                         wScan: 0,
-                        dwFlags: KEYEVENTF_KEYDOWN,
+                        dwFlags: key_down,
                         time: 0,
                         dwExtraInfo: 0,
                     },
@@ -69,7 +72,7 @@ fn send_key_combo(modifier: VIRTUAL_KEY, key: VIRTUAL_KEY) {
                     ki: KEYBDINPUT {
                         wVk: key,
                         wScan: 0,
-                        dwFlags: KEYEVENTF_KEYDOWN,
+                        dwFlags: key_down,
                         time: 0,
                         dwExtraInfo: 0,
                     },
@@ -128,7 +131,6 @@ pub fn show_without_focus(win: &tauri::WebviewWindow) {
 }
 
 pub fn start(app_handle: tauri::AppHandle) {
-    use windows::core::*;
     use windows::Win32::Foundation::HWND;
     use windows::Win32::System::Com::*;
     use windows::Win32::UI::Accessibility::*;

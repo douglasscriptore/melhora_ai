@@ -1,6 +1,6 @@
 [package]
 name = "melhora-ai"
-version = "0.2.10"
+version = "0.2.11"
 description = "Melhora.AI — assistente de texto com IA"
 authors = ["you"]
 edition = "2021"
