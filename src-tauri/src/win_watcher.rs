@@ -155,7 +155,7 @@ pub fn start(app_handle: tauri::AppHandle) {
 
                 let fg_hwnd: HWND = GetForegroundWindow();
                 let mut fg_pid: u32 = 0;
-                GetWindowThreadProcessId(fg_hwnd, Some(&mut fg_pid));
+                GetWindowThreadProcessId(fg_hwnd, Some(&mut fg_pid as *mut u32));
 
                 // Skip our own app — don't hide toolbar when user clicks toolbar buttons
                 if fg_pid == our_pid {
@@ -194,9 +194,10 @@ pub fn start(app_handle: tauri::AppHandle) {
                     Err(_) => continue,
                 };
 
-                // UIA_EditControlTypeId=50004, UIA_ComboBoxControlTypeId=50003,
-                // UIA_DocumentControlTypeId=50030
-                let is_text = matches!(ctrl_type, 50004 | 50003 | 50030);
+                let is_text = matches!(
+                    ctrl_type,
+                    UIA_EditControlTypeId | UIA_ComboBoxControlTypeId | UIA_DocumentControlTypeId
+                );
 
                 if !is_text {
                     if was_focused {
