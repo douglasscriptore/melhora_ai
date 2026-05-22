@@ -46,6 +46,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [resultMeta, setResultMeta] = useState<{ inputTokens?: number; outputTokens?: number; estimatedCostUSD?: number } | null>(null);
+  const [axPermission, setAxPermission] = useState<boolean | null>(null);
 
   const readClipboard = useCallback(async () => {
     if (!isTauri()) return;
@@ -56,6 +57,11 @@ export default function App() {
   }, []);
 
   useEffect(() => { readClipboard(); }, [readClipboard]);
+
+  useEffect(() => {
+    if (!isTauri()) return;
+    invoke<boolean>("check_ax_permission").then(setAxPermission).catch(() => setAxPermission(false));
+  }, []);
 
   // Restore last used mode once settings load
   useEffect(() => {
@@ -75,11 +81,25 @@ export default function App() {
     if (isTauri()) invoke("apply_window_mode", { mode }).catch(() => {});
   }, [settings?.windowMode, loading]);
 
+  // Sync toolbar enabled state with Rust backend
+  useEffect(() => {
+    if (!settings || loading || !isTauri()) return;
+    invoke("set_toolbar_enabled", { enabled: settings.toolbarEnabled ?? true }).catch(() => {});
+  }, [settings?.toolbarEnabled, loading]);
+
   // Apply theme to html element
   useEffect(() => {
     if (!settings || loading) return;
     document.documentElement.setAttribute("data-theme", settings.theme ?? "light");
   }, [settings?.theme, loading]);
+
+  // Apply macOS rounded corners via plugin
+  useEffect(() => {
+    if (!isTauri()) return;
+    import("./lib/mac-rounded-corners").then(({ enableModernWindowStyle }) => {
+      enableModernWindowStyle({ cornerRadius: 14, offsetX: 0, offsetY: 6 }).catch(() => {});
+    });
+  }, []);
 
   // Entrance animation on window focus (popup mode only)
   useEffect(() => {
@@ -292,6 +312,34 @@ export default function App() {
             <Alert.Indicator />
             <Alert.Content>
               <Alert.Description>{error}</Alert.Description>
+            </Alert.Content>
+          </Alert>
+        )}
+
+        {/* Accessibility permission alert */}
+        {axPermission === false && (
+          <Alert status="warning">
+            <Alert.Indicator />
+            <Alert.Content>
+              <Alert.Description>
+                <strong>Toolbar de inputs desativada.</strong> Conceda acesso de Acessibilidade para detectar campos de texto em outros apps.{" "}
+                <span
+                  role="button"
+                  tabIndex={0}
+                  className="underline font-semibold cursor-pointer"
+                  onClick={async () => {
+                    await invoke("request_ax_permission");
+                    setAxPermission(await invoke<boolean>("check_ax_permission"));
+                  }}
+                  onKeyDown={async (e) => {
+                    if (e.key !== "Enter") return;
+                    await invoke("request_ax_permission");
+                    setAxPermission(await invoke<boolean>("check_ax_permission"));
+                  }}
+                >
+                  Conceder acesso
+                </span>
+              </Alert.Description>
             </Alert.Content>
           </Alert>
         )}

@@ -4,5 +4,7 @@
 <dict>
   <key>LSUIElement</key>
   <true/>
+  <key>NSAccessibilityUsageDescription</key>
+  <string>Melhora.AI precisa de acesso de Acessibilidade para detectar campos de texto focados e injetar texto corrigido.</string>
 </dict>
 </plist>

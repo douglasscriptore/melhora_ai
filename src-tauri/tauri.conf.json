@@ -12,6 +12,7 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "Melhora.AI",
         "width": 480,
         "height": 600,
@@ -23,6 +24,20 @@
         "shadow": true,
         "alwaysOnTop": true,
         "skipTaskbar": true
+      },
+      {
+        "label": "toolbar",
+        "title": "",
+        "width": 380,
+        "height": 56,
+        "resizable": false,
+        "visible": false,
+        "decorations": false,
+        "transparent": true,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "center": false
       }
     ],
     "security": {

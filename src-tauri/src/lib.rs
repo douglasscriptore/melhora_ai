@@ -1,29 +1,102 @@
-use std::sync::Mutex;
+#[cfg(target_os = "macos")]
+mod ax_watcher;
+
+#[cfg(target_os = "windows")]
+mod win_watcher;
+
+mod plugins;
+use plugins::mac_rounded_corners;
+
+use std::sync::{atomic::{AtomicBool, Ordering}, Mutex};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Manager,
 };
 
-#[cfg(target_os = "macos")]
-fn apply_corner_radius(window: &tauri::WebviewWindow, radius: f64) {
-    use objc::{msg_send, sel, sel_impl};
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+static TOOLBAR_ENABLED: AtomicBool = AtomicBool::new(true);
 
-    if let Ok(handle) = window.window_handle() {
-        if let RawWindowHandle::AppKit(h) = handle.as_raw() {
-            unsafe {
-                let ns_view = h.ns_view.as_ptr() as *mut objc::runtime::Object;
-                let _: () = msg_send![ns_view, setWantsLayer: true];
-                let layer: *mut objc::runtime::Object = msg_send![ns_view, layer];
-                let _: () = msg_send![layer, setCornerRadius: radius];
-                let _: () = msg_send![layer, setMasksToBounds: true];
-            }
+
+struct AppMode(Mutex<String>);
+
+// ── Toolbar / AX commands ─────────────────────────────────────────────────────
+
+#[tauri::command]
+fn request_ax_permission() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        ax_watcher::request_permission_with_prompt()
+    }
+    #[cfg(target_os = "windows")]
+    {
+        true // UIA needs no explicit user permission on Windows
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        false
+    }
+}
+
+#[tauri::command]
+fn check_ax_permission() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        ax_watcher::check_permission()
+    }
+    #[cfg(target_os = "windows")]
+    {
+        true // UIA needs no explicit user permission on Windows
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        false
+    }
+}
+
+#[tauri::command]
+fn set_toolbar_enabled(enabled: bool, app: tauri::AppHandle) {
+    TOOLBAR_ENABLED.store(enabled, Ordering::Relaxed);
+    if !enabled {
+        if let Some(w) = app.get_webview_window("toolbar") {
+            let _ = w.hide();
         }
     }
 }
 
-struct AppMode(Mutex<String>);
+#[tauri::command]
+fn get_target_pid() -> Option<i32> {
+    #[cfg(target_os = "macos")]
+    { ax_watcher::get_last_pid() }
+    #[cfg(not(target_os = "macos"))]
+    { None }
+}
+
+#[tauri::command]
+fn inject_result(text: String, pid: Option<i32>) {
+    #[cfg(target_os = "macos")]
+    {
+        // Use caller-supplied pid (captured before AI call) or fall back to current.
+        let target_pid = pid.or_else(|| ax_watcher::get_last_pid());
+        std::thread::spawn(move || {
+            ax_watcher::write_to_clipboard_and_paste(&text, target_pid);
+        });
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::thread::spawn(move || {
+            win_watcher::write_to_clipboard_and_paste(&text);
+        });
+    }
+}
+
+#[tauri::command]
+fn hide_toolbar(app: tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("toolbar") {
+        let _ = w.hide();
+    }
+}
+
+// ── Window commands ───────────────────────────────────────────────────────────
 
 #[tauri::command]
 fn show_window(window: tauri::Window) {
@@ -118,8 +191,9 @@ pub fn run() {
             }
 
             let show_item = MenuItem::with_id(app, "show", "Abrir Melhora.AI", true, None::<&str>)?;
+            let toolbar_item = MenuItem::with_id(app, "toolbar", "Testar Toolbar", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Sair", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+            let menu = Menu::with_items(app, &[&show_item, &toolbar_item, &quit_item])?;
 
             let tray_icon = tauri::image::Image::from_bytes(
                 include_bytes!("../icons/tray.png")
@@ -135,6 +209,22 @@ pub fn run() {
                         if let Some(win) = app.get_webview_window("main") {
                             let _ = win.show();
                             let _ = win.set_focus();
+                        }
+                    }
+                    "toolbar" => {
+                        if let Some(toolbar) = app.get_webview_window("toolbar") {
+                            if toolbar.is_visible().unwrap_or(false) {
+                                let _ = toolbar.hide();
+                            } else {
+                                if let Some(monitor) = toolbar.current_monitor().ok().flatten() {
+                                    let size = monitor.size();
+                                    let tx = (size.width as f64 / 2.0 - 170.0).max(0.0);
+                                    let ty = size.height as f64 * 0.15;
+                                    let _ = toolbar.set_position(tauri::LogicalPosition::new(tx, ty));
+                                }
+                                let _ = toolbar.show();
+                                let _ = toolbar.set_focus();
+                            }
                         }
                     }
                     "quit" => app.exit(0),
@@ -198,11 +288,12 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            // Apply rounded corners at the OS (CALayer) level on macOS
+            // Start Accessibility watcher
             #[cfg(target_os = "macos")]
-            if let Some(win) = app.get_webview_window("main") {
-                apply_corner_radius(&win, 14.0);
-            }
+            ax_watcher::start(app.handle().clone());
+
+            #[cfg(target_os = "windows")]
+            win_watcher::start(app.handle().clone());
 
             Ok(())
         })
@@ -222,7 +313,20 @@ pub fn run() {
                 _ => {}
             }
         })
-        .invoke_handler(tauri::generate_handler![show_window, hide_window, apply_window_mode])
+        .invoke_handler(tauri::generate_handler![
+            show_window,
+            hide_window,
+            apply_window_mode,
+            check_ax_permission,
+            request_ax_permission,
+            inject_result,
+            hide_toolbar,
+            get_target_pid,
+            set_toolbar_enabled,
+            mac_rounded_corners::enable_rounded_corners,
+            mac_rounded_corners::enable_modern_window_style,
+            mac_rounded_corners::reposition_traffic_lights,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

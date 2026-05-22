@@ -27,6 +27,7 @@ export interface AppSettings {
   saveHistory: boolean;
   windowMode: "popup" | "window";
   theme: "light" | "dark";
+  toolbarEnabled: boolean;
   lastMode?: AIMode;
 }
 

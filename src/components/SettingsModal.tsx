@@ -336,6 +336,19 @@ export function SettingsPage({ settings, onSave, onBack }: Props) {
               <CheckboxContent>Salvar histórico local</CheckboxContent>
             </Checkbox>
 
+            <Checkbox
+              isSelected={form.toolbarEnabled ?? true}
+              onChange={(checked) => set("toolbarEnabled", checked)}
+            >
+              <CheckboxControl><CheckboxIndicator /></CheckboxControl>
+              <CheckboxContent>
+                <span>Toolbar flutuante</span>
+                <p className="text-xs mt-0.5" style={{ color: "var(--muted)" }}>
+                  Exibe botões de ação ao focar em campos de texto de outros apps
+                </p>
+              </CheckboxContent>
+            </Checkbox>
+
           </Tabs.Panel>
 
           {/* ── Sobre Tab ──────────────────────────────────────────────────── */}
