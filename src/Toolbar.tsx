@@ -5,6 +5,7 @@ import { Loader2, X, Check, AlertCircle, Sparkles } from "lucide-react";
 import { useSettings } from "./hooks/useSettings";
 import { processText } from "./services/ai.service";
 import { AIMode } from "./types";
+import { applyWindowCorners, installTransparentWindowStyles } from "./lib/window-corners";
 import "./App.css";
 
 interface FocusPayload { x: number; y: number; w: number; h: number; text: string; }
@@ -33,12 +34,9 @@ export default function Toolbar() {
 
   useEffect(() => {
     invoke<boolean>("check_ax_permission").then(setHasPermission).catch(() => setHasPermission(false));
-    // Prevent HeroUI body background from covering transparent corners
-    const style = document.createElement("style");
-    style.textContent = "html,body,#root{background:transparent!important;}";
-    document.head.appendChild(style);
-    // Clip native macOS window frame to rounded corners
-    invoke("set_corner_radius", { radius: 16.0 }).catch(() => {});
+    const cleanup = installTransparentWindowStyles();
+    applyWindowCorners({ cornerRadius: 16 });
+    return cleanup;
   }, []);
 
   useEffect(() => {
@@ -119,6 +117,7 @@ export default function Toolbar() {
         background: bg,
         border: `1px solid ${border}`,
         borderRadius: "16px",
+        overflow: "hidden",
         boxShadow: isDark
           ? "0 8px 32px rgba(0,0,0,0.5), 0 2px 8px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.06)"
           : "0 8px 32px rgba(0,0,0,0.14), 0 2px 8px rgba(0,0,0,0.06), inset 0 1px 0 rgba(255,255,255,0.9)",

@@ -4,8 +4,14 @@ mod ax_watcher;
 #[cfg(target_os = "windows")]
 mod win_watcher;
 
-
-use std::sync::{atomic::{AtomicBool, Ordering}, Mutex};
+use std::{
+    fs, io,
+    path::{Path, PathBuf},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Mutex,
+    },
+};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -13,38 +19,15 @@ use tauri::{
 };
 
 static TOOLBAR_ENABLED: AtomicBool = AtomicBool::new(true);
-
+const CHROME_EXTENSION_RESOURCE_DIR: &str = "chrome-extension";
 
 struct AppMode(Mutex<String>);
 
-/// Clips the window to rounded corners at the OS level by setting
-/// cornerRadius + masksToBounds on the NSWindow's contentView CALayer.
-#[tauri::command]
-fn set_corner_radius(window: tauri::WebviewWindow, radius: f64) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    {
-        use cocoa::appkit::{NSView, NSWindow};
-        use cocoa::base::{id, YES};
-        use objc::{msg_send, sel, sel_impl};
-        window
-            .with_webview(move |webview| unsafe {
-                let ns_window = webview.ns_window() as id;
-                let content_view: id = ns_window.contentView();
-                content_view.setWantsLayer(YES);
-                let layer: id = msg_send![content_view, layer];
-                if !layer.is_null() {
-                    let _: () = msg_send![layer, setCornerRadius: radius];
-                    let _: () = msg_send![layer, setMasksToBounds: YES];
-                }
-            })
-            .map_err(|e| e.to_string())?;
-        Ok(())
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = (window, radius);
-        Ok(())
-    }
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ChromeExtensionDownloadInfo {
+    path: String,
+    file_name: String,
 }
 
 // ── Toolbar / AX commands ─────────────────────────────────────────────────────
@@ -94,9 +77,13 @@ fn set_toolbar_enabled(enabled: bool, app: tauri::AppHandle) {
 #[tauri::command]
 fn get_target_pid() -> Option<i32> {
     #[cfg(target_os = "macos")]
-    { ax_watcher::get_last_pid() }
+    {
+        ax_watcher::get_last_pid()
+    }
     #[cfg(not(target_os = "macos"))]
-    { None }
+    {
+        None
+    }
 }
 
 #[tauri::command]
@@ -122,6 +109,205 @@ fn hide_toolbar(app: tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("toolbar") {
         let _ = w.hide();
     }
+}
+
+#[tauri::command]
+fn apply_window_corners(window: tauri::WebviewWindow, radius: f64) -> Result<(), String> {
+    apply_native_window_corners(&window, radius)
+}
+
+fn apply_native_window_corners(window: &tauri::WebviewWindow, radius: f64) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        use objc::runtime::{Class, Object, NO, YES};
+        use objc::{msg_send, sel, sel_impl};
+
+        window
+            .with_webview(move |webview| unsafe {
+                let ns_window = webview.ns_window() as *mut Object;
+                if ns_window.is_null() {
+                    return;
+                }
+
+                let _: () = msg_send![ns_window, setOpaque: NO];
+
+                if let Some(ns_color) = Class::get("NSColor") {
+                    let clear_color: *mut Object = msg_send![ns_color, clearColor];
+                    let _: () = msg_send![ns_window, setBackgroundColor: clear_color];
+                }
+
+                let content_view: *mut Object = msg_send![ns_window, contentView];
+                if content_view.is_null() {
+                    return;
+                }
+
+                let _: () = msg_send![content_view, setWantsLayer: YES];
+                let layer: *mut Object = msg_send![content_view, layer];
+                if layer.is_null() {
+                    return;
+                }
+
+                let _: () = msg_send![layer, setCornerRadius: radius];
+                let _: () = msg_send![layer, setMasksToBounds: YES];
+            })
+            .map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        use std::ffi::c_void;
+        use windows::Win32::Foundation::HWND;
+        use windows::Win32::Graphics::Dwm::{
+            DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DWMWCP_ROUNDSMALL,
+            DWM_WINDOW_CORNER_PREFERENCE,
+        };
+
+        if let Ok(handle) = window.window_handle() {
+            if let RawWindowHandle::Win32(h) = handle.as_raw() {
+                let preference: DWM_WINDOW_CORNER_PREFERENCE = if radius <= 8.0 {
+                    DWMWCP_ROUNDSMALL
+                } else {
+                    DWMWCP_ROUND
+                };
+
+                unsafe {
+                    DwmSetWindowAttribute(
+                        HWND(h.hwnd.get() as isize),
+                        DWMWA_WINDOW_CORNER_PREFERENCE,
+                        &preference as *const _ as *const c_void,
+                        std::mem::size_of::<DWM_WINDOW_CORNER_PREFERENCE>() as u32,
+                    )
+                    .map_err(|e| e.to_string())?;
+                }
+            }
+        }
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let _ = (window, radius);
+    }
+
+    Ok(())
+}
+
+// ── Chrome extension commands ────────────────────────────────────────────────
+
+#[tauri::command]
+fn download_chrome_extension(app: tauri::AppHandle) -> Result<ChromeExtensionDownloadInfo, String> {
+    let source = chrome_extension_source_dir(&app)?;
+    let file_name = format!(
+        "melhora-ai-chrome-extension-v{}.zip",
+        env!("CARGO_PKG_VERSION")
+    );
+    let destination = app
+        .path()
+        .download_dir()
+        .map_err(|e| format!("Não foi possível localizar a pasta Downloads: {e}"))?
+        .join(&file_name);
+
+    create_chrome_extension_zip(&source, &destination)?;
+
+    Ok(ChromeExtensionDownloadInfo {
+        path: destination.to_string_lossy().to_string(),
+        file_name,
+    })
+}
+
+fn chrome_extension_source_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        let bundled = resource_dir.join(CHROME_EXTENSION_RESOURCE_DIR);
+        if bundled.exists() {
+            return Ok(bundled);
+        }
+    }
+
+    let dev_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("extension");
+
+    if dev_dir.exists() {
+        return Ok(dev_dir);
+    }
+
+    Err("Pasta da extensão não encontrada no bundle do app.".to_string())
+}
+
+fn create_chrome_extension_zip(source: &Path, destination: &Path) -> Result<(), String> {
+    if !source.is_dir() {
+        return Err(format!(
+            "Origem da extensão não é uma pasta: {}",
+            source.display()
+        ));
+    }
+
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent).map_err(|e| {
+            format!(
+                "Não foi possível criar a pasta de download {}: {e}",
+                parent.display()
+            )
+        })?;
+    }
+
+    if destination.exists() {
+        fs::remove_file(destination)
+            .map_err(|e| format!("Não foi possível substituir {}: {e}", destination.display()))?;
+    }
+
+    let file = fs::File::create(destination).map_err(|e| {
+        format!(
+            "Não foi possível criar o arquivo da extensão {}: {e}",
+            destination.display()
+        )
+    })?;
+    let mut zip = zip::ZipWriter::new(file);
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+
+    add_directory_to_zip(&mut zip, source, source, options)?;
+    zip.finish()
+        .map_err(|e| format!("Não foi possível finalizar o arquivo da extensão: {e}"))?;
+
+    Ok(())
+}
+
+fn add_directory_to_zip(
+    zip: &mut zip::ZipWriter<fs::File>,
+    base: &Path,
+    directory: &Path,
+    options: zip::write::SimpleFileOptions,
+) -> Result<(), String> {
+    for entry in fs::read_dir(directory)
+        .map_err(|e| format!("Não foi possível ler {}: {e}", directory.display()))?
+    {
+        let entry = entry.map_err(|e| format!("Não foi possível ler item da extensão: {e}"))?;
+        let path = entry.path();
+        let entry_type = entry
+            .file_type()
+            .map_err(|e| format!("Não foi possível identificar {}: {e}", path.display()))?;
+        let relative_path = path
+            .strip_prefix(base)
+            .map_err(|e| format!("Não foi possível empacotar {}: {e}", path.display()))?;
+        let zip_path = relative_path.to_string_lossy().replace('\\', "/");
+
+        if entry_type.is_dir() {
+            zip.add_directory(format!("{zip_path}/"), options)
+                .map_err(|e| format!("Não foi possível adicionar {zip_path} ao zip: {e}"))?;
+            add_directory_to_zip(zip, base, &path, options)?;
+        } else if entry_type.is_file() {
+            zip.start_file(&zip_path, options)
+                .map_err(|e| format!("Não foi possível adicionar {zip_path} ao zip: {e}"))?;
+            let mut file = fs::File::open(&path)
+                .map_err(|e| format!("Não foi possível abrir {}: {e}", path.display()))?;
+            io::copy(&mut file, zip).map_err(|e| {
+                format!("Não foi possível copiar {} para o zip: {e}", path.display())
+            })?;
+        }
+    }
+
+    Ok(())
 }
 
 // ── Window commands ───────────────────────────────────────────────────────────
@@ -201,6 +387,7 @@ pub fn run() {
                 *app.state::<AppMode>().0.lock().unwrap() = saved_mode.clone();
 
                 if let Some(win) = app.get_webview_window("main") {
+                    let _ = apply_native_window_corners(&win, 14.0);
                     match saved_mode.as_str() {
                         "window" => {
                             let _ = win.set_always_on_top(false);
@@ -216,16 +403,20 @@ pub fn run() {
                         }
                     }
                 }
+
+                if let Some(toolbar) = app.get_webview_window("toolbar") {
+                    let _ = apply_native_window_corners(&toolbar, 16.0);
+                }
             }
 
             let show_item = MenuItem::with_id(app, "show", "Abrir Melhora.AI", true, None::<&str>)?;
-            let toolbar_item = MenuItem::with_id(app, "toolbar", "Testar Toolbar", true, None::<&str>)?;
+            let toolbar_item =
+                MenuItem::with_id(app, "toolbar", "Testar Toolbar", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Sair", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show_item, &toolbar_item, &quit_item])?;
 
-            let tray_icon = tauri::image::Image::from_bytes(
-                include_bytes!("../icons/tray.png")
-            ).expect("tray icon");
+            let tray_icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png"))
+                .expect("tray icon");
 
             let _tray = TrayIconBuilder::new()
                 .icon(tray_icon)
@@ -248,7 +439,8 @@ pub fn run() {
                                     let size = monitor.size();
                                     let tx = (size.width as f64 / 2.0 - 170.0).max(0.0);
                                     let ty = size.height as f64 * 0.15;
-                                    let _ = toolbar.set_position(tauri::LogicalPosition::new(tx, ty));
+                                    let _ =
+                                        toolbar.set_position(tauri::LogicalPosition::new(tx, ty));
                                 }
                                 let _ = toolbar.show();
                                 let _ = toolbar.set_focus();
@@ -325,21 +517,19 @@ pub fn run() {
 
             Ok(())
         })
-        .on_window_event(|window, event| {
-            match event {
-                tauri::WindowEvent::Focused(false) => {
-                    let mode = window.app_handle().state::<AppMode>();
-                    let mode_str = mode.0.lock().unwrap().clone();
-                    if mode_str == "popup" {
-                        let _ = window.hide();
-                    }
-                }
-                tauri::WindowEvent::CloseRequested { api, .. } => {
-                    api.prevent_close();
+        .on_window_event(|window, event| match event {
+            tauri::WindowEvent::Focused(false) => {
+                let mode = window.app_handle().state::<AppMode>();
+                let mode_str = mode.0.lock().unwrap().clone();
+                if mode_str == "popup" {
                     let _ = window.hide();
                 }
-                _ => {}
             }
+            tauri::WindowEvent::CloseRequested { api, .. } => {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+            _ => {}
         })
         .invoke_handler(tauri::generate_handler![
             show_window,
@@ -351,7 +541,8 @@ pub fn run() {
             hide_toolbar,
             get_target_pid,
             set_toolbar_enabled,
-            set_corner_radius,
+            apply_window_corners,
+            download_chrome_extension,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

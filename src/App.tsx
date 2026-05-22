@@ -12,6 +12,7 @@ import { useSettings } from "./hooks/useSettings";
 import { ModeSelector } from "./components/ModeSelector";
 import { SettingsPage } from "./components/SettingsModal";
 import { HistoryDrawer } from "./components/HistoryPanel";
+import { applyWindowCorners, installTransparentWindowStyles } from "./lib/window-corners";
 import logoFull from "./assets/logo_full.png";
 import logoRpcDark from "./assets/logo.png";
 import logoRpcLight from "./assets/logo_default.png";
@@ -81,13 +82,11 @@ export default function App() {
     if (isTauri()) invoke("apply_window_mode", { mode }).catch(() => {});
   }, [settings?.windowMode, loading]);
 
-  // Clip native macOS window frame to rounded corners
+  // Override HeroUI's runtime-injected body background so .app-root border-radius shows through
   useEffect(() => {
-    if (!isTauri()) return;
-    const s = document.createElement("style");
-    s.textContent = "html,body{background:transparent!important;}";
-    document.head.appendChild(s);
-    invoke("set_corner_radius", { radius: 14.0 }).catch(() => {});
+    const cleanup = installTransparentWindowStyles();
+    applyWindowCorners({ cornerRadius: 14 });
+    return cleanup;
   }, []);
 
   // Sync toolbar enabled state with Rust backend

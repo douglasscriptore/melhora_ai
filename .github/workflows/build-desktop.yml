@@ -35,6 +35,17 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      - name: Validate release tag version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          APP_VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          if [ "$APP_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::Tag v${TAG_VERSION} does not match src-tauri/tauri.conf.json version ${APP_VERSION}"
+            exit 1
+          fi
+
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
@@ -47,8 +58,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: ${{ github.ref_name }}
           releaseDraft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
+          includeUpdaterJson: true
+          updaterJsonPreferNsis: true

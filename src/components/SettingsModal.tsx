@@ -1,10 +1,11 @@
 import { useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import {
   Button, Label, Checkbox, CheckboxControl, CheckboxIndicator, CheckboxContent,
   Select, SelectTrigger, SelectValue, SelectIndicator, SelectPopover,
   ListBox, ListBoxItem, Tabs,
 } from "@heroui/react";
-import { ArrowLeft, ExternalLink, BadgeCheck, Eye, EyeOff, Sun, Moon, MessageSquareWarning, RefreshCw, Check, Loader2 } from "lucide-react";
+import { ArrowLeft, ExternalLink, BadgeCheck, Eye, EyeOff, Sun, Moon, MessageSquareWarning, RefreshCw, Check, Loader2, Download } from "lucide-react";
 import { AppSettings } from "../types";
 import { PROVIDER_MODELS, MODEL_LABELS } from "../services/ai.service";
 import { checkForUpdate, downloadAndInstall, CURRENT_VERSION, UpdateStatus } from "../services/checkupdate.service";
@@ -17,6 +18,11 @@ interface Props {
   onSave: (s: AppSettings) => void;
   onBack: () => void;
 }
+
+type ChromeExtensionDownloadInfo = {
+  path: string;
+  fileName: string;
+};
 
 const inputCls = [
   "w-full px-3 py-2 text-sm rounded-xl outline-none transition-colors font-sans",
@@ -101,6 +107,9 @@ export function SettingsPage({ settings, onSave, onBack }: Props) {
   const [latestVersion, setLatestVersion] = useState<string | null>(null);
   const [downloadPct, setDownloadPct] = useState<number | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
+  const [pluginPath, setPluginPath] = useState<string | null>(null);
+  const [pluginStatus, setPluginStatus] = useState<"idle" | "downloading" | "ready" | "error">("idle");
+  const [pluginError, setPluginError] = useState<string | null>(null);
 
   async function checkUpdate() {
     setUpdateStatus("checking");
@@ -124,6 +133,20 @@ export function SettingsPage({ settings, onSave, onBack }: Props) {
       setUpdateError(e instanceof Error ? e.message : "Falha ao instalar.");
     }
   }
+
+  async function downloadPlugin() {
+    setPluginStatus("downloading");
+    setPluginError(null);
+    try {
+      const info = await invoke<ChromeExtensionDownloadInfo>("download_chrome_extension");
+      setPluginPath(info.path);
+      setPluginStatus("ready");
+    } catch (e: unknown) {
+      setPluginStatus("error");
+      setPluginError(e instanceof Error ? e.message : "Falha ao baixar o plugin.");
+    }
+  }
+
   const models = PROVIDER_MODELS[form.apiProvider] ?? [];
   const info = PROVIDER_INFO[form.apiProvider];
 
@@ -425,6 +448,47 @@ export function SettingsPage({ settings, onSave, onBack }: Props) {
               {updateStatus === "error" && (
                 <span className="text-xs" style={{ color: "var(--danger, #ef4444)" }}>
                   {updateError ?? "Não foi possível verificar atualizações."}
+                </span>
+              )}
+            </div>
+
+            {/* Chrome extension */}
+            <div
+              className="rounded-xl px-3 py-2.5 flex flex-col gap-2"
+              style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-semibold" style={{ color: "var(--foreground)" }}>
+                  Extensão do Chrome
+                </span>
+                <span className="text-[10px] uppercase tracking-widest" style={{ color: "var(--muted)" }}>
+                  Manual
+                </span>
+              </div>
+              <p className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                Baixe o arquivo da extensão, extraia o zip e carregue a pasta no Chrome em modo de desenvolvedor.
+              </p>
+              <div className="grid grid-cols-1 gap-2">
+                <Button
+                  variant="outline"
+                  fullWidth
+                  isDisabled={pluginStatus === "downloading"}
+                  onPress={downloadPlugin}
+                  className="text-sm justify-start"
+                >
+                  {pluginStatus === "downloading"
+                    ? <><Loader2 size={14} className="animate-spin" /> Gerando...</>
+                    : <><Download size={14} /> Baixar plugin</>}
+                </Button>
+              </div>
+              {pluginPath && (
+                <span className="text-[11px] leading-relaxed break-all" style={{ color: "var(--muted)" }}>
+                  Salvo em {pluginPath}
+                </span>
+              )}
+              {pluginStatus === "error" && (
+                <span className="text-xs" style={{ color: "var(--danger, #ef4444)" }}>
+                  {pluginError ?? "Não foi possível baixar o plugin."}
                 </span>
               )}
             </div>

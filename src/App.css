@@ -8,6 +8,9 @@
 
 html, body, #root {
   height: 100%;
+  margin: 0;
+  background: transparent !important;
+  overflow: hidden;
 }
 
 .app-root {
@@ -15,6 +18,7 @@ html, body, #root {
   height: 100%;
   border-radius: 14px;
   overflow: hidden;
+  box-sizing: border-box;
 }
 
 /* Settings page slide-in */
