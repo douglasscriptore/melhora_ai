@@ -1,4 +1,4 @@
-export const CURRENT_VERSION = "0.2.8";
+export const CURRENT_VERSION = "0.2.9";
 export const RELEASES_URL = "https://github.com/douglasscriptore/melhora_ai/releases";
 
 type DownloadEvent =

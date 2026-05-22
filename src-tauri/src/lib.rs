@@ -88,6 +88,9 @@ fn get_target_pid() -> Option<i32> {
 
 #[tauri::command]
 fn inject_result(text: String, pid: Option<i32>) {
+    #[cfg(not(target_os = "macos"))]
+    let _ = pid;
+
     #[cfg(target_os = "macos")]
     {
         // Use caller-supplied pid (captured before AI call) or fall back to current.
@@ -173,7 +176,7 @@ fn apply_native_window_corners(window: &tauri::WebviewWindow, radius: f64) -> Re
 
                 unsafe {
                     DwmSetWindowAttribute(
-                        HWND(h.hwnd.get() as isize),
+                        HWND(h.hwnd.get() as *mut c_void),
                         DWMWA_WINDOW_CORNER_PREFERENCE,
                         &preference as *const _ as *const c_void,
                         std::mem::size_of::<DWM_WINDOW_CORNER_PREFERENCE>() as u32,
@@ -330,6 +333,9 @@ fn apply_window_mode(
     state: tauri::State<AppMode>,
     mode: String,
 ) {
+    #[cfg(not(target_os = "macos"))]
+    let _ = &app;
+
     *state.0.lock().unwrap() = mode.clone();
     match mode.as_str() {
         "window" => {

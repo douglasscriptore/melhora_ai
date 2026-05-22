@@ -25,6 +25,7 @@ pub struct FocusPayload {
 }
 
 pub fn write_to_clipboard_and_paste(text: &str) {
+    use std::ffi::c_void;
     use windows::Win32::Foundation::HWND;
     use windows::Win32::UI::Input::KeyboardAndMouse::*;
     use windows::Win32::UI::WindowsAndMessaging::SetForegroundWindow;
@@ -38,7 +39,7 @@ pub fn write_to_clipboard_and_paste(text: &str) {
         return;
     }
 
-    unsafe { SetForegroundWindow(HWND(hwnd)) };
+    unsafe { SetForegroundWindow(HWND(hwnd as *mut c_void)) };
     std::thread::sleep(std::time::Duration::from_millis(200));
 
     send_key_combo(VK_CONTROL, VK_A);
@@ -105,6 +106,7 @@ fn send_key_combo(modifier: VIRTUAL_KEY, key: VIRTUAL_KEY) {
 
 pub fn show_without_focus(win: &tauri::WebviewWindow) {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use std::ffi::c_void;
     use windows::Win32::Foundation::HWND;
     use windows::Win32::UI::WindowsAndMessaging::*;
 
@@ -112,7 +114,7 @@ pub fn show_without_focus(win: &tauri::WebviewWindow) {
         if let RawWindowHandle::Win32(h) = handle.as_raw() {
             unsafe {
                 SetWindowPos(
-                    HWND(h.hwnd.get() as isize),
+                    HWND(h.hwnd.get() as *mut c_void),
                     HWND_TOPMOST,
                     0,
                     0,
@@ -215,7 +217,7 @@ pub fn start(app_handle: tauri::AppHandle) {
 
                 let text = get_element_text(&focused).unwrap_or_default();
 
-                set_last_hwnd(fg_hwnd.0);
+                set_last_hwnd(fg_hwnd.0 as isize);
 
                 let payload = FocusPayload {
                     x: rect.left as f64,
@@ -247,6 +249,7 @@ pub fn start(app_handle: tauri::AppHandle) {
 unsafe fn get_element_text(
     element: &windows::Win32::UI::Accessibility::IUIAutomationElement,
 ) -> Option<String> {
+    use windows::core::Interface;
     use windows::Win32::UI::Accessibility::*;
 
     // ValuePattern — works for standard inputs and browser inputs
