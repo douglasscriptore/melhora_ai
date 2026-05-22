@@ -4,8 +4,6 @@ mod ax_watcher;
 #[cfg(target_os = "windows")]
 mod win_watcher;
 
-mod plugins;
-use plugins::mac_rounded_corners;
 
 use std::sync::{atomic::{AtomicBool, Ordering}, Mutex};
 use tauri::{
@@ -18,6 +16,36 @@ static TOOLBAR_ENABLED: AtomicBool = AtomicBool::new(true);
 
 
 struct AppMode(Mutex<String>);
+
+/// Clips the window to rounded corners at the OS level by setting
+/// cornerRadius + masksToBounds on the NSWindow's contentView CALayer.
+#[tauri::command]
+fn set_corner_radius(window: tauri::WebviewWindow, radius: f64) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        use cocoa::appkit::{NSView, NSWindow};
+        use cocoa::base::{id, YES};
+        use objc::{msg_send, sel, sel_impl};
+        window
+            .with_webview(move |webview| unsafe {
+                let ns_window = webview.ns_window() as id;
+                let content_view: id = ns_window.contentView();
+                content_view.setWantsLayer(YES);
+                let layer: id = msg_send![content_view, layer];
+                if !layer.is_null() {
+                    let _: () = msg_send![layer, setCornerRadius: radius];
+                    let _: () = msg_send![layer, setMasksToBounds: YES];
+                }
+            })
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (window, radius);
+        Ok(())
+    }
+}
 
 // ── Toolbar / AX commands ─────────────────────────────────────────────────────
 
@@ -323,9 +351,7 @@ pub fn run() {
             hide_toolbar,
             get_target_pid,
             set_toolbar_enabled,
-            mac_rounded_corners::enable_rounded_corners,
-            mac_rounded_corners::enable_modern_window_style,
-            mac_rounded_corners::reposition_traffic_lights,
+            set_corner_radius,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

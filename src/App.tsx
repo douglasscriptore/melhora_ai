@@ -81,6 +81,15 @@ export default function App() {
     if (isTauri()) invoke("apply_window_mode", { mode }).catch(() => {});
   }, [settings?.windowMode, loading]);
 
+  // Clip native macOS window frame to rounded corners
+  useEffect(() => {
+    if (!isTauri()) return;
+    const s = document.createElement("style");
+    s.textContent = "html,body{background:transparent!important;}";
+    document.head.appendChild(s);
+    invoke("set_corner_radius", { radius: 14.0 }).catch(() => {});
+  }, []);
+
   // Sync toolbar enabled state with Rust backend
   useEffect(() => {
     if (!settings || loading || !isTauri()) return;
@@ -93,13 +102,6 @@ export default function App() {
     document.documentElement.setAttribute("data-theme", settings.theme ?? "light");
   }, [settings?.theme, loading]);
 
-  // Apply macOS rounded corners via plugin
-  useEffect(() => {
-    if (!isTauri()) return;
-    import("./lib/mac-rounded-corners").then(({ enableModernWindowStyle }) => {
-      enableModernWindowStyle({ cornerRadius: 14, offsetX: 0, offsetY: 6 }).catch(() => {});
-    });
-  }, []);
 
   // Entrance animation on window focus (popup mode only)
   useEffect(() => {

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { Loader2, X, Check, AlertCircle, Sparkles } from "lucide-react";
@@ -25,6 +25,7 @@ export default function Toolbar() {
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [hovered, setHovered]           = useState<AIMode | null>(null);
   const [animKey, setAnimKey]           = useState(0);
+  const prevFieldRef = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     if (settings) document.documentElement.setAttribute("data-theme", settings.theme ?? "light");
@@ -32,6 +33,12 @@ export default function Toolbar() {
 
   useEffect(() => {
     invoke<boolean>("check_ax_permission").then(setHasPermission).catch(() => setHasPermission(false));
+    // Prevent HeroUI body background from covering transparent corners
+    const style = document.createElement("style");
+    style.textContent = "html,body,#root{background:transparent!important;}";
+    document.head.appendChild(style);
+    // Clip native macOS window frame to rounded corners
+    invoke("set_corner_radius", { radius: 16.0 }).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -40,16 +47,22 @@ export default function Toolbar() {
     let unDenied:(() => void) | undefined;
 
     listen<FocusPayload>("ax-focus-changed", (e) => {
-      setCurrentText(e.payload.text);
+      const { x, y, text } = e.payload;
+      setCurrentText(text);
       setDoneMode(null);
       setError(false);
-      setAnimKey((k) => k + 1); // re-triggers entrance animation
+      // Only retrigger entrance animation when focus moves to a different field
+      const prev = prevFieldRef.current;
+      const isNewField = !prev || Math.abs(prev.x - x) > 10 || Math.abs(prev.y - y) > 10;
+      prevFieldRef.current = { x, y };
+      if (isNewField) setAnimKey((k) => k + 1);
     }).then((f) => { unFocus = f; });
 
     listen("ax-focus-lost", () => {
       setCurrentText("");
       setDoneMode(null);
       setError(false);
+      prevFieldRef.current = null;
     }).then((f) => { unBlur = f; });
 
     listen("ax-permission-denied", () => {
